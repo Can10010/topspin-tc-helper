@@ -1,0 +1,134 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width,initial-scale=1" />
+  <title>t/c 极简计算器</title>
+  <style>
+    body { font-family: system-ui, -apple-system, "Segoe UI", Arial; margin: 18px; line-height: 1.4; }
+    .card { max-width: 900px; margin: 0 auto; padding: 16px; border: 1px solid #ddd; border-radius: 12px; }
+    textarea, input { width: 100%; box-sizing: border-box; font-size: 16px; padding: 10px; border-radius: 10px; border: 1px solid #ccc; }
+    button { font-size: 16px; padding: 10px 14px; border-radius: 10px; border: 1px solid #ccc; cursor: pointer; }
+    .row { display: flex; gap: 10px; flex-wrap: wrap; margin-top: 10px; }
+    .row > * { flex: 1; min-width: 160px; }
+    pre { background: #f7f7f7; padding: 12px; border-radius: 10px; overflow: auto; }
+    .hint { color: #444; font-size: 14px; margin-top: 8px; }
+    .ok { color: #0a7; }
+    .err { color: #c00; }
+    code { background:#f2f2f2; padding: 1px 6px; border-radius: 6px; }
+  </style>
+</head>
+<body>
+  <div class="card">
+    <h2>t/c 极简计算器（单文件版）</h2>
+
+    <div class="hint">
+      输入顺序：<code>T_K t_raw1 t_raw2 c_raw1 c_raw2</code>（空格/逗号/Tab 分隔）<br/>
+      示例：<code>278 32210.8 98.976 39777.79 92.251</code><br/>
+      提示：线性拟合用 <b>invT(=1/T)</b> 与 <b>Lnk（或 Lnk'）</b>；非线性作图/拟合用 <b>T_K</b> 与 <b>Gt-c</b>。
+    </div>
+
+    <h3 style="margin-top:14px;">输入（5个数一行）</h3>
+    <textarea id="in" rows="3" placeholder="例如：278 32210.8 98.976 39777.79 92.251"></textarea>
+
+    <div class="row">
+      <button id="calc">计算</button>
+      <button id="copy">复制 TSV</button>
+      <button id="clear">清空</button>
+    </div>
+
+    <div id="msg" class="hint" style="margin-top:10px;"></div>
+
+    <h3 style="margin-top:14px;">输出（TSV 可直接复制）</h3>
+    <pre id="out">t	c	invT	Lnk	Lnk'	T_K	Gt-c	Gc-t
+（点击“计算”后生成）</pre>
+  </div>
+
+<script>
+(() => {
+  const R_CAL = 1.987;     // 与你Excel一致
+  const DIV_1000 = 1000;   // 与你Excel一致
+
+  const $in = document.getElementById('in');
+  const $out = document.getElementById('out');
+  const $msg = document.getElementById('msg');
+
+  function setMsg(text, ok=true) {
+    $msg.textContent = text;
+    $msg.className = 'hint ' + (ok ? 'ok' : 'err');
+  }
+
+  function parseFive(line) {
+    const parts = line.replace(/,/g, ' ').trim().split(/\s+/).filter(Boolean);
+    if (parts.length !== 5) throw new Error(`需要 5 个数，但你输入了 ${parts.length} 个。`);
+    const nums = parts.map(x => {
+      const v = Number(x);
+      if (!Number.isFinite(v)) throw new Error(`存在无法解析为数字的项：${x}`);
+      return v;
+    });
+    return nums; // [T_K, t1, t2, c1, c2]
+  }
+
+  function fmt(x) {
+    // 既不太长也保留精度：最多 15 位有效数字
+    if (!Number.isFinite(x)) return String(x);
+    return Number(x.toPrecision(15)).toString();
+  }
+
+  function compute() {
+    const line = $in.value.trim();
+    if (!line) { setMsg('请输入一行 5 个数。', false); return; }
+
+    let T_K, t1, t2, c1, c2;
+    try {
+      [T_K, t1, t2, c1, c2] = parseFive(line);
+    } catch (e) {
+      setMsg(e.message, false);
+      return;
+    }
+
+    const t = t1 * t2;
+    const c = c1 * c2;
+    const invT = 1 / T_K;
+    const k = t / c;
+    const lnk = Math.log(k);
+    const lnk_p = -lnk;
+    const G_t_c = -(R_CAL * T_K * lnk) / DIV_1000;
+    const G_c_t = -G_t_c;
+
+    const header = "t\tc\tinvT\tLnk\tLnk'\tT_K\tGt-c\tGc-t";
+    const row = [t, c, invT, lnk, lnk_p, T_K, G_t_c, G_c_t].map(fmt).join("\t");
+    $out.textContent = header + "\n" + row;
+
+    setMsg('计算成功 ✅（可直接点“复制 TSV”）', true);
+  }
+
+  async function copyTSV() {
+    const text = $out.textContent;
+    try {
+      await navigator.clipboard.writeText(text);
+      setMsg('已复制到剪贴板 ✅', true);
+    } catch (e) {
+      // 兼容性兜底：选中让用户手动复制
+      setMsg('自动复制失败：请长按/全选输出文本手动复制。', false);
+      // 尝试选中输出
+      // (移动端不一定生效)
+    }
+  }
+
+  document.getElementById('calc').addEventListener('click', compute);
+  document.getElementById('copy').addEventListener('click', copyTSV);
+  document.getElementById('clear').addEventListener('click', () => {
+    $in.value = '';
+    $out.textContent = "t\tc\tinvT\tLnk\tLnk'\tT_K\tGt-c\tGc-t\n（点击“计算”后生成）";
+    setMsg('', true);
+  });
+
+  // 回车快捷：PC上按 Ctrl+Enter 计算
+  $in.addEventListener('keydown', (e) => {
+    if ((e.ctrlKey || e.metaKey) && e.key === 'Enter') compute();
+  });
+})();
+</script>
+</body>
+</html>
